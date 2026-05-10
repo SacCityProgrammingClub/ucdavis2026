@@ -2,6 +2,12 @@ import { useState } from 'react';
 import { X, CreditCard, Lock } from 'lucide-react';
 import type { Event } from './EventCard';
 
+import {
+  CardElement,
+  useStripe,
+  useElements,
+} from '@stripe/react-stripe-js';
+
 interface DonationFormProps {
   event: Event;
   onClose: () => void;
@@ -12,31 +18,73 @@ export function DonationForm({ event, onClose, onDonationComplete }: DonationFor
   const [donationType, setDonationType] = useState<'one-time' | 'recurring'>('one-time');
   const [selectedAmount, setSelectedAmount] = useState<number | null>(50);
   const [customAmount, setCustomAmount] = useState('');
+  const stripe = useStripe();
+  const elements = useElements();
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
-    cardNumber: '',
-    expiry: '',
-    cvv: '',
     zipCode: '',
     comments: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    const amount = selectedAmount === null ? parseFloat(customAmount) : selectedAmount;
+  if (!stripe || !elements) {
+    return;
+  }
 
-    alert('Payment processing with Stripe (Demo Mode)\n\n' +
-          `Donation Amount: $${amount}\n` +
-          `Event: ${event.title}\n` +
-          `Type: ${donationType}\n\n` +
-          'In production, this would process the payment securely through Stripe API.\n' +
-          'API Key would be stored in environment variables: STRIPE_SECRET_KEY');
+  const amount =
+    selectedAmount === null
+      ? parseFloat(customAmount)
+      : selectedAmount;
+
+  const response = await fetch(
+    'http://localhost:3001/create-payment-intent',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: Math.round(amount * 100),
+      }),
+    }
+  );
+
+  const data = await response.json();
+
+  const cardElement = elements.getElement(CardElement);
+
+  if (!cardElement) {
+    return;
+  }
+
+  const result = await stripe.confirmCardPayment(
+    data.clientSecret,
+    {
+      payment_method: {
+        card: cardElement,
+        billing_details: {
+          name: formData.fullName,
+          email: formData.email,
+          address: {
+            postal_code: formData.zipCode,
+          },
+        },
+      },
+    }
+  );
+
+  if (result.error) {
+    alert(result.error.message);
+  } else {
+    alert('Donation successful!');
 
     onDonationComplete(event.id, amount);
     onClose();
-  };
+  }
+};
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({
@@ -178,65 +226,49 @@ export function DonationForm({ event, onClose, onDonationComplete }: DonationFor
                 <span className="text-sm text-gray-500">Secure Payment via Stripe</span>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-gray-700 mb-2">Card Number *</label>
-                  <input
-                    type="text"
-                    name="cardNumber"
-                    required
-                    value={formData.cardNumber}
-                    onChange={handleChange}
-                    placeholder="1234 5678 9012 3456"
-                    maxLength={19}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#2E5490]"
+            <div className="space-y-4">
+              <div>
+                <label className="block text-gray-700 mb-2">
+                  Card Information *
+                </label>
+
+                <div className="w-full px-4 py-4 border border-gray-300 rounded-md focus-within:ring-2 focus-within:ring-[#2E5490]">
+                  <CardElement
+                    options={{
+                      style: {
+                        base: {
+                          fontSize: '16px',
+                          color: '#333333',
+                          '::placeholder': {
+                            color: '#9CA3AF',
+                          },
+                        },
+                        invalid: {
+                          color: '#EF4444',
+                        },
+                      },
+                      hidePostalCode: true,
+                    }}
                   />
                 </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="col-span-1">
-                    <label className="block text-gray-700 mb-2">Expiry *</label>
-                    <input
-                      type="text"
-                      name="expiry"
-                      required
-                      value={formData.expiry}
-                      onChange={handleChange}
-                      placeholder="MM/YY"
-                      maxLength={5}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#2E5490]"
-                    />
-                  </div>
-
-                  <div className="col-span-1">
-                    <label className="block text-gray-700 mb-2">CVV *</label>
-                    <input
-                      type="text"
-                      name="cvv"
-                      required
-                      value={formData.cvv}
-                      onChange={handleChange}
-                      placeholder="123"
-                      maxLength={4}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#2E5490]"
-                    />
-                  </div>
-
-                  <div className="col-span-1">
-                    <label className="block text-gray-700 mb-2">ZIP Code *</label>
-                    <input
-                      type="text"
-                      name="zipCode"
-                      required
-                      value={formData.zipCode}
-                      onChange={handleChange}
-                      placeholder="12345"
-                      maxLength={10}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#2E5490]"
-                    />
-                  </div>
-                </div>
               </div>
+
+              <div>
+                <label className="block text-gray-700 mb-2">
+                  ZIP Code *
+                </label>
+
+                <input
+                  type="text"
+                  name="zipCode"
+                  required
+                  value={formData.zipCode}
+                  onChange={handleChange}
+                  placeholder="12345"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#2E5490]"
+                />
+              </div>
+            </div>
             </div>
 
             <div>
